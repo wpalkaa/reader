@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import './App.css'
 
-import ePub from 'epubjs';
+import 'foliate-js/view.js'
+
 import LightModeToggle from './components/LightModeToggle';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
@@ -12,9 +13,9 @@ function App() {
     const [theme, setTheme] = useState(() => {
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) return savedTheme;
-
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' 
     });
+
     useEffect(() => {
         const root = document.documentElement;
         if( theme === 'dark') {
@@ -24,110 +25,146 @@ function App() {
         }
         localStorage.setItem('theme', theme);
     }, [theme]);
+
     const toggleTheme = () => {
         setTheme((prevTheme) => prevTheme === 'dark' ? 'light' : 'dark');
     }
     
-    // Epub section
-    const [book, setBook] = useState<ePub.Book | null>(null);
-    const [currentPage, setCurrentPage] = useState<number>(0);
-    const [totalPages, setTotalPages] = useState<number>(0);
+    // Foliate-js section
+    const [bookFile, setBookFile] = useState<File | null>(null);
+    const [progress, setProgress] = useState<string>("0%");
 
-    const viewerRef = useRef<HTMLDivElement>(null);
-    const renditionRef = useRef<ePub.Rendition | null>(null);
+    const viewerContainerRef = useRef<HTMLDivElement>(null);
+    const foliateViewRef = useRef<HTMLElement>(null); 
 
-    const handleSelectFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const handleSelectFile = (event: ChangeEvent<HTMLInputElement>) => {
         if( event.target.files && event.target.files.length > 0) {
-            const file: File = event.target.files[0];
-
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                const newBook = ePub(arrayBuffer);
-                setBook(newBook);
-            } catch (error) {
-                alert("Błąd wczytania pliku");
-                console.error("Błąd wczytania pliku:", error);
-            }
+            setBookFile(event.target.files[0]);
         }
     }
 
     // Book rendering
-    useEffect(() => {
-        // Flaga chroniąca przed podwójnym wywołaniem w React Strict Mode
-        let isMounted = true; 
-
-        if (book && viewerRef.current) {
-            const rendition = book.renderTo(viewerRef.current, {
-                width: '100%',
-                height: '100%',
-                spread: 'none',
-            });
-            
-            rendition.display();
-            renditionRef.current = rendition;
-            console.log("Book instance: ", book);
-            console.log("Rendition: ", rendition)
-
-            book.ready
-                .then(() => {
-                    console.log("Rozpoczęto generowanie lokacji (to może chwilę potrwać)...");
-                    return book.locations.generate(1024);
-                })
-                .then(() => {
-                    // Aktualizuj stan tylko jeśli komponent wciąż jest zamontowany
-                    if (isMounted) { 
-                        const total = book.locations.length();
-                        setTotalPages(total);
-                        console.log("total: ", total);
-                    }
-                })
-                .catch((error) => {
-                    // Złapanie błędów, jeśli epub.js napotka problem
-                    console.error("Błąd podczas generowania lokacji:", error);
-                });
-
-            return () => {
-                isMounted = false; // Zapobiega memory leaks (wyciekom pamięci) przy aktualizacji stanu
-                rendition.destroy();
-            }
-        }
-    }, [book]);
-
     const nextPage = () => {
-        if (renditionRef.current) {
-            renditionRef.current.next();
-            console.log(renditionRef.current)
-            console.log(book)
-        }
+        if (foliateViewRef.current) foliateViewRef.current.next();
     }
     const prevPage = () => {
-        if (renditionRef.current) {
-            renditionRef.current.prev();
-        }
+        if (foliateViewRef.current) foliateViewRef.current.prev();
     }
+
+    const getBookStyles = (currentTheme: string) => {
+        if( currentTheme === 'dark' ) {
+            return `
+                p, li, div, h1, h2, h3, h4, h5, h6 {
+                    color: #ffffff;
+                }
+            `;
+        } else {
+            return `
+                p, li, div, h1, h2, h3, h4, h5, h6 {
+                    color: black;
+                }
+            `;
+        }
+}
+
+    useEffect(() => {
+        if (bookFile && viewerContainerRef.current) {
+            const viewerContainer = viewerContainerRef.current;
+            const view = document.createElement('foliate-view') as any;
+
+            foliateViewRef.current = view;
+
+            viewerContainer.innerHTML = '';
+            viewerContainer.appendChild(view);
+            
+            
+            view.open(bookFile)
+            .then(() => {
+                    view.renderer.setAttribute('margin', '24px');
+                    view.renderer.setStyles(getBookStyles(theme));
+                    view.renderer.setAttribute('max-column-count', '1');
+                    view.goTo(0)
+                })
+                .catch((error: Error) => {
+                    alert("Błąd wczytania pliku");
+                    console.error("Błąd ładowania książki przez Foliate:", error);
+                });
+
+            // Total read function
+            const handleRelocate = (e: any) => {
+                const fraction = e.detail?.fraction;
+                if (typeof fraction === 'number') {
+                    const percent = Math.round(fraction * 100);
+                    setProgress(`${percent}%`);
+                }
+            };
+
+            view.addEventListener('relocate', handleRelocate);
+
+            // Next/Prev page with keyboard
+            const handleKeyDown = (e: KeyboardEvent) => {
+                if(!foliateViewRef.current) return;
+                
+                const nextKeys = ['ArrowRight', 'd'];
+                const prevKeys = ['ArrowLeft', 'a'];
+
+                if (nextKeys.includes(e.key)) {
+                    nextPage();
+                } else if (prevKeys.includes(e.key)) {
+                    prevPage();
+                }
+            }
+
+            window.addEventListener('keydown', handleKeyDown);
+            
+            return () => {
+                view.removeEventListener('relocate', handleRelocate);
+                viewerContainer.innerHTML = '';
+                foliateViewRef.current = null;
+                window.removeEventListener('keydown', handleKeyDown);
+            }
+        }
+    }, [bookFile]);
+
+    useEffect(() => {
+        // Sprawdzamy, czy czytnik już istnieje i ma renderera
+        if (foliateViewRef.current && foliateViewRef.current.renderer) {
+            foliateViewRef.current.renderer.setStyles(getBookStyles(theme));
+        }
+    }, [theme]);
 
     return (
         <div className="relative bg-bg-primary text-text-primary min-h-screen transition-colors duration-300 flex justify-center py-10">
             <LightModeToggle theme={theme} toggleTheme={toggleTheme} />
 
-            {!book 
+            {!bookFile 
             ? <div className="flex flex-col gap-2 justify-center mb-30 w-[40vw] items-center">
-                <label className="text-2xl font-bold">{book ? 'Zmień książkę' : 'Wybierz książkę'}:</label>
-                <input type='file' accept='.epub' required  onChange={handleSelectFile}
+                <label className="text-2xl font-bold">Wybierz książkę:</label>
+                <input type='file' accept='.epub' required onChange={handleSelectFile}
                     className="file:border file:border-green-500">
                 </input>
             </div>
             : <div className="flex flex-col gap-1 items-center">
-                <div ref={viewerRef} className="w-[60vw] h-[80vh] border border-b-amber-200/80 rounded-lg"></div>
+                {/* viewer */}
+                <div 
+                    ref={viewerContainerRef} 
+                    className="relative w-[60vw] h-[80vh] border border-amber-200 rounded-lg bg-bg-secondary transition-colors duration-300 text-white"
+                ></div>
                 
-                <div className="flex gap-2 justify-center">
-                    <button onClick={prevPage}><FontAwesomeIcon icon={faChevronLeft} /></button>
-                    <div>{book?.locations?.length()}</div>
-                    <button onClick={nextPage}><FontAwesomeIcon icon={faChevronRight} /></button>
+                {/* Button section */}
+                <div className="flex gap-4 mt-2 justify-center items-center">
+                    <button onClick={prevPage} className="p-2 hover:text-green-500 transition-colors">
+                        <FontAwesomeIcon icon={faChevronLeft} />
+                    </button>
+                    
+                    <div className="font-semibold min-w-[3rem] text-center">{progress}</div>
+                    
+                    <button onClick={nextPage} className="p-2 hover:text-green-500 transition-colors">
+                        <FontAwesomeIcon icon={faChevronRight} />
+                    </button>
                 </div>
             </div>
             }
-
         </div>
     )
 }
