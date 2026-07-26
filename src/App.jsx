@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ChangeEvent } from 'react'
 import './App.css'
 
 import 'foliate-js/view.js'
@@ -31,13 +30,13 @@ function App() {
     }
     
     // Foliate-js section
-    const [bookFile, setBookFile] = useState<File | null>(null);
-    const [progress, setProgress] = useState<string>("0%");
+    const [bookFile, setBookFile] = useState(null);
+    const [progress, setProgress] = useState("0%");
 
-    const viewerContainerRef = useRef<HTMLDivElement>(null);
-    const foliateViewRef = useRef<HTMLElement>(null); 
+    const viewerContainerRef = useRef(null);
+    const foliateViewRef = useRef(null); 
 
-    const handleSelectFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const handleSelectFile = (event) => {
         if( event.target.files && event.target.files.length > 0) {
             setBookFile(event.target.files[0]);
         }
@@ -51,7 +50,7 @@ function App() {
         if (foliateViewRef.current) foliateViewRef.current.prev();
     }
 
-    const getBookStyles = (currentTheme: string) => {
+    const getBookStyles = (currentTheme) => {
         if( currentTheme === 'dark' ) {
             return `
                 p, li, div, h1, h2, h3, h4, h5, h6 {
@@ -70,7 +69,7 @@ function App() {
     useEffect(() => {
         if (bookFile && viewerContainerRef.current) {
             const viewerContainer = viewerContainerRef.current;
-            const view = document.createElement('foliate-view') as any;
+            const view = document.createElement('foliate-view');
 
             foliateViewRef.current = view;
 
@@ -85,14 +84,15 @@ function App() {
                     view.renderer.setAttribute('max-column-count', '1');
                     view.goTo(0)
                 })
-                .catch((error: Error) => {
+                .catch((error) => {
                     alert("Błąd wczytania pliku");
                     console.error("Błąd ładowania książki przez Foliate:", error);
                 });
 
             // Total read function
-            const handleRelocate = (e: any) => {
-                const fraction = e.detail?.fraction;
+            const handleRelocate = (event) => {
+                console.log("rel:", event.detail)
+                const fraction = event.detail?.fraction;
                 if (typeof fraction === 'number') {
                     const percent = Math.round(fraction * 100);
                     setProgress(`${percent}%`);
@@ -102,15 +102,15 @@ function App() {
             view.addEventListener('relocate', handleRelocate);
 
             // Next/Prev page with keyboard
-            const handleKeyDown = (e: KeyboardEvent) => {
+            const handleKeyDown = (event) => {
                 if(!foliateViewRef.current) return;
                 
                 const nextKeys = ['ArrowRight', 'd'];
                 const prevKeys = ['ArrowLeft', 'a'];
 
-                if (nextKeys.includes(e.key)) {
+                if (nextKeys.includes(event.key)) {
                     nextPage();
-                } else if (prevKeys.includes(e.key)) {
+                } else if (prevKeys.includes(event.key)) {
                     prevPage();
                 }
             }
@@ -126,12 +126,27 @@ function App() {
         }
     }, [bookFile]);
 
+    // Change styles on page style change
     useEffect(() => {
-        // Sprawdzamy, czy czytnik już istnieje i ma renderera
         if (foliateViewRef.current && foliateViewRef.current.renderer) {
             foliateViewRef.current.renderer.setStyles(getBookStyles(theme));
         }
     }, [theme]);
+
+
+    // Translation
+    const [isTranslate, setIsTranslate] = useState(false)
+    const translateChapters = async () => {
+        setIsTranslate(prev => !prev);
+
+    }
+    const handleTranslate = async () => {
+        const view = foliateViewRef.current;
+        if(!view) return;
+
+        const shadowRoot = view.renderer?.shadowRoot;
+        console.log(shadowRoot)
+    }
 
     return (
         <div className="relative bg-bg-primary text-text-primary min-h-screen transition-colors duration-300 flex justify-center py-10">
@@ -151,7 +166,7 @@ function App() {
                     className="relative w-[60vw] h-[80vh] border border-amber-200 rounded-lg bg-bg-secondary transition-colors duration-300 text-white"
                 ></div>
                 
-                {/* Button section */}
+                {/* Buttons section */}
                 <div className="flex gap-4 mt-2 justify-center items-center">
                     <button onClick={prevPage} className="p-2 hover:text-green-500 transition-colors">
                         <FontAwesomeIcon icon={faChevronLeft} />
@@ -162,6 +177,9 @@ function App() {
                     <button onClick={nextPage} className="p-2 hover:text-green-500 transition-colors">
                         <FontAwesomeIcon icon={faChevronRight} />
                     </button>
+                </div>
+                <div className="flex justify-center items-center p-1>">
+                    <button onClick={translateChapters}>{isTranslate ? "Wyłącz tłumaczenie" : "Przetłumacz"}</button>
                 </div>
             </div>
             }

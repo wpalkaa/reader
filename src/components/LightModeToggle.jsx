@@ -2,7 +2,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMoon } from '@fortawesome/free-solid-svg-icons/faMoon';
 import { faLightbulb } from '@fortawesome/free-solid-svg-icons/faLightbulb';
 
-export default function LightModeToggle({ theme, toggleTheme }: { theme: string, toggleTheme: () => void }) {
+export default function LightModeToggle({ theme, toggleTheme }) {
     return (
         <div className="absolute top-4 left-4">
             <div 
