@@ -2,10 +2,13 @@ import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 import 'foliate-js/view.js'
+import { buildPrompt } from "./lib/buildPrompt";
 
 import LightModeToggle from './components/LightModeToggle';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+
+import { GoogleGenAI, Type } from '@google/genai';
 
 function App() {
     // Dark/Light mode 
@@ -36,6 +39,17 @@ function App() {
     const viewerContainerRef = useRef(null);
     const foliateViewRef = useRef(null); 
 
+    // Foliate Iframe ref of current chapter
+    const currentIframeDocRef = useRef(null);
+
+    const [isTranslate, setIsTranslate] = useState(false);
+    const [isTranslating, setIsTranslating] = useState(false);
+
+    const isTranslateRef = useRef(isTranslate);
+    useEffect(() => {
+        isTranslateRef.current = isTranslate;
+    }, [isTranslate]);
+
     const handleSelectFile = (event) => {
         if( event.target.files && event.target.files.length > 0) {
             setBookFile(event.target.files[0]);
@@ -53,18 +67,115 @@ function App() {
     const getBookStyles = (currentTheme) => {
         if( currentTheme === 'dark' ) {
             return `
-                p, li, div, h1, h2, h3, h4, h5, h6 {
-                    color: #ffffff;
+            p, li, div, h1, h2, h3, h4, h5, h6 {
+                color: #ffffff;
                 }
-            `;
-        } else {
-            return `
+                `;
+            } else {
+                return `
                 p, li, div, h1, h2, h3, h4, h5, h6 {
                     color: black;
                 }
             `;
         }
-}
+    }
+
+    const toggleTranslation = () => {
+        setIsTranslate(prevState => {
+            const newState = !prevState;
+            if (newState) {
+                translateCurrentChapter();
+            }
+            return newState;
+        });
+    }
+
+    // Translate chapter function
+    const translateCurrentChapter = async () => {
+        const doc = currentIframeDocRef.current;
+        const view = foliateViewRef.current;
+
+        if( !doc || !view ) {
+            console.error("Brak książki do przetłumaczenia");
+            return;
+        }
+
+        const body = doc.body;
+        const textNodes = [];
+        const textsToSend = [];
+
+        const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+            acceptNode: (node) => {
+                if (!node.nodeValue || node.nodeValue.trim() === '') return NodeFilter.FILTER_REJECT;
+                
+                const parent = node.parentElement;
+                if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE'].includes(parent.tagName.toUpperCase())) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        })
+
+        let currentNode;
+        while ((currentNode = walker.nextNode())) {
+            textNodes.push(currentNode);
+            textsToSend.push(currentNode.nodeValue);
+        }
+
+        if (textsToSend.length === 0) return;
+        await console.log(buildPrompt(JSON.stringify(textsToSend)))
+        try {
+            setIsTranslating(true);
+
+            const apiKeyHard = "";
+            const ai = new GoogleGenAI({apiKey: apiKeyHard});
+
+            const response = await ai.models.generateContent({
+                model: "gemini-3.5-flash-lite",
+                contents: buildPrompt(textsToSend),
+                config: {
+                    temperature: 0.3,
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.STRING,
+                        },
+                    },
+                },
+            });
+            const translatedTexts = JSON.parse(response.text);
+            console.log("translatedTexts:", translatedTexts)
+            // Mock
+            // const translatedTexts = await new Promise(resolve => 
+            //     setTimeout(() => resolve(textsToSend.map(t => `[PL] ${t} tlumaczone`)), 1500)
+            // );
+
+            if (!translatedTexts) {
+                throw new Error("Empty result");
+            }
+            if(translatedTexts.length !== textNodes.length) {
+                // throw new Error(`API response does not match send nodes: ${translatedTexts.length}/${textNodes.length}`)
+                console.log(`zła ilość elementów: ${translatedTexts.length}/${textNodes.length}`)
+            }
+
+            // 2. Replacing text
+            textNodes.forEach((node, index) => {
+                node.nodeValue = translatedTexts[index];
+            });
+
+            // 3. Wymuszenie przeliczenia układu (tekst zmienił rozmiar)
+            if (typeof view.layout === 'function') {
+                view.layout();
+            };
+
+        } catch (error) {
+            console.error("Wystąpił błąd podczas tłumaczenia rozdziału:", error);
+        } finally {
+            setIsTranslating(false);
+        }
+    }
 
     useEffect(() => {
         if (bookFile && viewerContainerRef.current) {
@@ -72,7 +183,7 @@ function App() {
             const view = document.createElement('foliate-view');
 
             foliateViewRef.current = view;
-
+            
             viewerContainer.innerHTML = '';
             viewerContainer.appendChild(view);
             
@@ -92,6 +203,7 @@ function App() {
             // Total read function
             const handleRelocate = (event) => {
                 console.log("rel:", event.detail)
+                console.log("reloacte.range: ", event.detail.range);
                 const fraction = event.detail?.fraction;
                 if (typeof fraction === 'number') {
                     const percent = Math.round(fraction * 100);
@@ -99,7 +211,18 @@ function App() {
                 }
             };
 
+            // Event 'load' takes place when foliate creates new iframe (new chapter)
+            const handleLoad = (event) => {
+                currentIframeDocRef.current = event.detail.doc;
+                console.log("[DEBUG]: currentIframeDocRef = ", currentIframeDocRef.current);
+
+                if( isTranslateRef.current ) {
+                    translateCurrentChapter();
+                }
+            };
+
             view.addEventListener('relocate', handleRelocate);
+            view.addEventListener('load', handleLoad);
 
             // Next/Prev page with keyboard
             const handleKeyDown = (event) => {
@@ -119,8 +242,10 @@ function App() {
             
             return () => {
                 view.removeEventListener('relocate', handleRelocate);
+                view.removeEventListener('load', handleLoad);
                 viewerContainer.innerHTML = '';
                 foliateViewRef.current = null;
+                currentIframeDocRef.current = null;
                 window.removeEventListener('keydown', handleKeyDown);
             }
         }
@@ -132,22 +257,6 @@ function App() {
             foliateViewRef.current.renderer.setStyles(getBookStyles(theme));
         }
     }, [theme]);
-
-
-    // Translation
-    const [isTranslate, setIsTranslate] = useState(false)
-    const translateChapters = async () => {
-        setIsTranslate(prev => !prev);
-
-    }
-    const handleTranslate = async () => {
-        const view = foliateViewRef.current;
-        if(!view) return;
-
-        const shadowRoot = view.renderer?.shadowRoot;
-        console.log(shadowRoot)
-    }
-
     return (
         <div className="relative bg-bg-primary text-text-primary min-h-screen transition-colors duration-300 flex justify-center py-10">
             <LightModeToggle theme={theme} toggleTheme={toggleTheme} />
@@ -179,7 +288,7 @@ function App() {
                     </button>
                 </div>
                 <div className="flex justify-center items-center p-1>">
-                    <button onClick={translateChapters}>{isTranslate ? "Wyłącz tłumaczenie" : "Przetłumacz"}</button>
+                    <button onClick={toggleTranslation}>{isTranslate ? "Wyłącz tłumaczenie" : "Przetłumacz"}</button>
                 </div>
             </div>
             }
