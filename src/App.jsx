@@ -100,75 +100,81 @@ function App() {
             return;
         }
 
-        const body = doc.body;
-        const textNodes = [];
-        const textsToSend = [];
+        const blockElements = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+        const elementsToTranslate = [];
+        const htmlToSend = [];
 
-        const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
-            acceptNode: (node) => {
-                if (!node.nodeValue || node.nodeValue.trim() === '') return NodeFilter.FILTER_REJECT;
-                
-                const parent = node.parentElement;
-                if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE'].includes(parent.tagName.toUpperCase())) {
-                    return NodeFilter.FILTER_REJECT;
-                }
-                
-                return NodeFilter.FILTER_ACCEPT;
+        blockElements.forEach(el => {
+            if (el.textContent && el.textContent.trim() !== '') {
+                elementsToTranslate.push(el);
+                htmlToSend.push(el.innerHTML);
             }
-        })
+        });
 
-        let currentNode;
-        while ((currentNode = walker.nextNode())) {
-            textNodes.push(currentNode);
-            textsToSend.push(currentNode.nodeValue);
+        if (htmlToSend.length === 0) {
+            alert("Did not find any text to translate.");
+            toggleTranslation();
+            return;
         }
 
-        if (textsToSend.length === 0) return;
-        await console.log(buildPrompt(JSON.stringify(textsToSend)))
         try {
             setIsTranslating(true);
 
-            const apiKeyHard = "";
-            const ai = new GoogleGenAI({apiKey: apiKeyHard});
+            const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+            const ai = new GoogleGenAI({apiKey: GEMINI_API_KEY});
+            
+            const batchSize = 200; 
+            let finalTranslatedTexts = [];
 
-            const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash-lite",
-                contents: buildPrompt(textsToSend),
-                config: {
-                    temperature: 0.3,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.STRING,
+            for (let i = 0; i < htmlToSend.length; i += batchSize) {
+                const chunk = htmlToSend.slice(i, i + batchSize);
+                
+                const chunkWithIds = chunk.map((text, idx) => ({ 
+                    id: i + idx, 
+                    text: text 
+                }));
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-3.5-flash-lite",
+                    contents: buildPrompt(JSON.stringify(chunkWithIds)),
+                    config: {
+                        temperature: 0.1, 
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.INTEGER },
+                                    text: { type: Type.STRING }
+                                },
+                                required: ["id", "text"]
+                            },
                         },
                     },
-                },
-            });
-            const translatedTexts = JSON.parse(response.text);
-            console.log("translatedTexts:", translatedTexts)
-            // Mock
-            // const translatedTexts = await new Promise(resolve => 
-            //     setTimeout(() => resolve(textsToSend.map(t => `[PL] ${t} tlumaczone`)), 1500)
-            // );
+                });
 
-            if (!translatedTexts) {
-                throw new Error("Empty result");
-            }
-            if(translatedTexts.length !== textNodes.length) {
-                // throw new Error(`API response does not match send nodes: ${translatedTexts.length}/${textNodes.length}`)
-                console.log(`zła ilość elementów: ${translatedTexts.length}/${textNodes.length}`)
+                const translatedChunk = JSON.parse(response.text);
+                
+                translatedChunk.sort((a, b) => a.id - b.id);
+
+                translatedChunk.forEach(item => {
+                    finalTranslatedTexts.push(item.text);
+                });
             }
 
-            // 2. Replacing text
-            textNodes.forEach((node, index) => {
-                node.nodeValue = translatedTexts[index];
+            if(finalTranslatedTexts.length !== htmlToSend.length) {
+                console.error(`Niezgodność liczby elementów: Wysłano ${htmlToSend.length}, otrzymano ${finalTranslatedTexts.length}`);
+                return;
+            }
+
+            elementsToTranslate.forEach((el, index) => {
+                el.innerHTML = finalTranslatedTexts[index]; 
             });
 
-            // 3. Wymuszenie przeliczenia układu (tekst zmienił rozmiar)
             if (typeof view.layout === 'function') {
                 view.layout();
-            };
+            }
 
         } catch (error) {
             console.error("Wystąpił błąd podczas tłumaczenia rozdziału:", error);

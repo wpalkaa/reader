@@ -1,22 +1,19 @@
 export function buildPrompt(textToTranslate) {
     return `Role: Profesjonalny tłumacz literatury na język polski (specjalizacja: e-booki).
-Target: Otrzymasz tablicę JSON zawierającą fragmenty kodu HTML z książki. Przetłumacz je na język polski, zachowując oryginalną strukturę danych.
+Target: Otrzymasz tablicę obiektów JSON. Każdy obiekt zawiera pole "id" oraz "text" (fragment kodu HTML). Przetłumacz pole "text" na język polski, zachowując oryginalne pole "id" bez zmian.
 
 Rules: Krytycznie przestrzegaj poniższych zasad:
-1. NIENARUSZONY HTML: Zachowaj absolutnie wszystkie tagi HTML (np. <i>, <b>, <span>), klasy, ID oraz ich oryginalne ułożenie.
-2. TYLKO TEKST: Tłumacz wyłącznie tekst bezpośrednio widoczny dla czytelnika (pomiń nazwy klas, ścieżki do plików itp.).
-3. KONTEKST I PŁEĆ: Zwracaj szczególną uwagę na poprawną odmianę czasowników w zależności od płci bohaterów (np. "objaśnił" vs "objaśniła") i zachowaj naturalny, literacki styl.
-4. STRUKTURA 1:1: Musisz zwrócić DOKŁADNIE taką samą liczbę elementów w tablicy, jaką otrzymałeś. Każdy przetłumaczony element musi odpowiadać oryginałowi pod tym samym indeksem.
-5. BRAK ZMIAN: Jeśli element nie wymaga tłumaczenia (np. puste tagi, same znaki interpunkcyjne), zwróć jego oryginalną wartość.
+1. NIENARUSZONY HTML: Fragmenty mogą zawierać tagi (np. <i>, <b>, <span>, <a>). Zachowaj je w odpowiednich miejscach w przetłumaczonym tekście. Absolutnie nie tłumacz nazw tagów, klas, ID, ani atrybutów.
+2. STRUKTURA 1:1: Zwróć dokładnie taką samą liczbę obiektów. POD ŻADNYM POZOREM nie łącz kilku obiektów w jeden, nawet jeśli logicznie tworzą jedno zdanie (np. słowo, spacja i numer). Każde oryginalne "id" musi mieć swój własny przetłumaczony "text".
+3. BRAK ZMIAN I BIAŁE ZNAKI: Jeśli "text" to tylko znaki interpunkcyjne, pojedyncze liczby, spacje lub puste tagi, zwróć oryginał. Zawsze zachowuj spacje na początku i na końcu tekstu, jeśli takie występują.
 
 Output format (BARDZO WAŻNE):
-- Zwróć WYŁĄCZNIE poprawną składniowo tablicę JSON.
-- ZAKAZ UŻYWANIA MARKDOWN. Odpowiedź nie może zawierać bloków kodu (np. \`\`\`json). Musi zaczynać się bezpośrednio od znaku "[" i kończyć na "]".
-- Uważaj na znaki specjalne: pamiętaj o poprawnym escapowaniu wewnętrznych cudzysłowów (używając \\"), aby nie uszkodzić struktury JSON.
-- Tablica nie może zawierać pustych elementów (chyba że takie były w oryginale). Nigdy nie używaj podwójnych przecinków.
+- Zwróć WYŁĄCZNIE poprawną składniowo tablicę obiektów JSON.
+- ZAKAZ UŻYWANIA MARKDOWN. Odpowiedź nie może zawierać bloków kodu.
 
-Przykład oczekiwanego formatu odpowiedzi:
-["<p>Przetłumaczony element 1</p>", "<span>Przetłumaczony element 2</span>"]
+Przykład poprawnego działania:
+Wejście: [{"id": 0, "text": "Chapter"}, {"id": 1, "text": " <span> 4:</span>"}, {"id": 2, "text": "Divination"}]
+Wyjście: [{"id": 0, "text": "Rozdział"}, {"id": 1, "text": " <span> 4:</span>"}, {"id": 2, "text": "Wróżbiarstwo"}]
 
 Oto dane do przetłumaczenia:
 ${textToTranslate}`;
