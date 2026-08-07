@@ -1,5 +1,8 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faList } from '@fortawesome/free-solid-svg-icons';
+import { useState } from 'react';
+
+import Sidebar from '@/components/Sidebar'; 
 
 /**
  * Widok czytnika książki: kontener na <foliate-view>, pasek postępu,
@@ -21,9 +24,33 @@ export default function BookViewer({
     isTranslate,
     isTranslating,
     onToggleTranslation,
+    toc,
+    goTo,
 }) {
+
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
     return (
         <div className="flex flex-col gap-1 items-center">
+            {/* Przycisk Menu (Spis treści) na górze lub z boku czytnika */}
+            <div className="w-[60vw] flex justify-start mb-2">
+                <button 
+                    onClick={() => setIsSidebarOpen(true)}
+                    className="flex items-center gap-2 p-2 hover:text-green-500 transition-colors font-semibold"
+                >
+                    <FontAwesomeIcon icon={faList} />
+                    <span>Spis treści</span>
+                </button>
+            </div>
+
+            {/* Sidebar Komponent */}
+            <Sidebar 
+                isOpen={isSidebarOpen} 
+                onClose={() => setIsSidebarOpen(false)} 
+                toc={toc} 
+                onNavigate={goTo} 
+            />
+
             {/* Kontener, do którego Foliate wstrzykuje element <foliate-view> */}
             <div
                 ref={viewerContainerRef}
@@ -36,7 +63,7 @@ export default function BookViewer({
                     <FontAwesomeIcon icon={faChevronLeft} />
                 </button>
 
-                <div className="font-semibold min-w-[3rem] text-center">{progress}</div>
+                <div className="font-semibold min-w-12 text-center">{progress}</div>
 
                 <button onClick={onNextPage} className="p-2 hover:text-green-500 transition-colors">
                     <FontAwesomeIcon icon={faChevronRight} />

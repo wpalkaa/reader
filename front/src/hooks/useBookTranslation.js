@@ -1,93 +1,29 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { buildPrompt } from '@/lib/buildPrompt';
-// import { getCachedChapter, setCachedChapter } from '../lib/bookCache';
 import {
-    TRANSLATION_MODEL,
     TRANSLATION_BATCH_SIZE,
     TRANSLATABLE_SELECTOR,
 } from '@/lib/constants';
 
-/**
- * Hook odpowiedzialny za tłumaczenie treści aktualnie wyświetlanego
- * rozdziału książki przy użyciu modelu Gemini, z cache'owaniem wyników
- * na dysku (zobacz `lib/bookCache.js`).
- *
- * Zasada działania:
- * 1. Jeśli przekazano `bookFileName` + `chapterId`, sprawdzamy najpierw cache –
- *    w razie trafienia wstawiamy zapisane wcześniej tłumaczenie i kończymy
- *    (bez odpytywania API).
- * 2. W przeciwnym razie pobieramy wszystkie elementy blokowe z dokumentu
- *    (iframe) rozdziału, dzielimy je na paczki (batch) i wysyłamy do modelu.
- * 3. Podmieniamy oryginalną treść HTML na przetłumaczoną, z zachowaniem tagów,
- *    a wynik zapisujemy w cache na przyszłość.
- */
+const TRANSLATION_MODEL = import.meta.env.VITE_GEMINI_MODEL;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
 export function useBookTranslation() {
     const [isTranslate, setIsTranslate] = useState(false);
     const [isTranslating, setIsTranslating] = useState(false);
 
-    // Ref przechowujący aktualną wartość `isTranslate`, potrzebny wewnątrz
-    // listenerów zdarzeń Foliate (żeby uniknąć odczytu nieaktualnej wartości
-    // stanu przez "stale closure" w efekcie).
     const isTranslateRef = useRef(isTranslate);
     useEffect(() => {
         isTranslateRef.current = isTranslate;
     }, [isTranslate]);
 
-    /**
-     * Tłumaczy treść przekazanego dokumentu (iframe rozdziału) i podmienia
-     * ją bezpośrednio w DOM, a następnie prosi Foliate o ponowne przeliczenie
-     * layoutu strony.
-     *
-     * @param {Document} doc - dokument iframe'a aktualnie wyświetlanego rozdziału
-     * @param {object} view - instancja <foliate-view>
-     * @param {object} [cacheInfo] - dane potrzebne do odczytu/zapisu cache
-     * @param {string} [cacheInfo.bookFileName] - nazwa pliku książki (klucz katalogu cache)
-     * @param {string|number} [cacheInfo.chapterId] - identyfikator rozdziału (klucz pliku cache)
-     */
-    const translateCurrentChapter = useCallback(async (doc, view, cacheInfo = {}) => {
-        const { bookFileName, chapterId } = cacheInfo;
-
+    const translateCurrentChapter = useCallback(async (doc, view) => {
         if (!doc || !view) {
             console.error('[Tłumaczenie] Brak załadowanego rozdziału lub widoku książki – nie można rozpocząć tłumaczenia.');
             return;
         }
-
-        // Body dokumentu rozdziału – tu wstawiamy zarówno tłumaczenie z cache,
-        // jak i finalny wynik świeżo przetłumaczonej treści.
-        const contentRoot = doc.body || doc.documentElement;
-
-
-
-
-
-
-
-
-        // 1. Sprawdzenie cache – jeśli rozdział był już wcześniej przetłumaczony
-        // dla tej książki, wstawiamy zapisaną treść bez wywoływania API.
-        // if (bookFileName && chapterId !== undefined && chapterId !== null) {
-        //     const cachedHtml = await getCachedChapter(bookFileName, chapterId);
-        //     if (cachedHtml !== null) {
-        //         contentRoot.innerHTML = cachedHtml;
-        //         if (typeof view.layout === 'function') {
-        //             view.layout();
-        //         }
-        //         return;
-        //     }
-        // }
-
-
-
-
-
-
-
-
-
-
-
-
 
         const blockElements = doc.querySelectorAll(TRANSLATABLE_SELECTOR);
         const elementsToTranslate = [];
@@ -107,7 +43,6 @@ export function useBookTranslation() {
             return;
         }
 
-        const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
         if (!GEMINI_API_KEY) {
             console.error('[Tłumaczenie] Brak klucza API Gemini (zmienna środowiskowa VITE_GEMINI_API_KEY).');
             alert('Nie skonfigurowano klucza API do tłumaczenia. Ustaw zmienną VITE_GEMINI_API_KEY w pliku .env.');
@@ -118,15 +53,44 @@ export function useBookTranslation() {
         try {
             setIsTranslating(true);
 
+            try {
+                const cacheResponse = await fetch(`${BACKEND_URL}/api/cache/get`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ originalHtmlArray: htmlToSend })
+                });
+
+                if (cacheResponse.ok) {
+                    const cacheData = await cacheResponse.json();
+                    
+                    if (cacheData.translatedHtmlArray) {
+                        console.log('[Tłumaczenie] Znaleziono gotowe tłumaczenie na serwerze cache!');
+                        
+                        elementsToTranslate.forEach((el, index) => {
+                            el.innerHTML = cacheData.translatedHtmlArray[index];
+                        });
+
+                        if (typeof view.layout === 'function') {
+                            view.layout();
+                        }
+                        return;
+                    }
+                }
+            } catch (cacheError) {
+                console.warn('[Tłumaczenie] Brak komunikacji z serwerem Cache na porcie 3001.', cacheError);
+            }
+
             const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
             const finalTranslatedTexts = [];
 
+            // Wysyła tablicę obiektów [{"id": x, "text": x}], przyjmuje taką samą przetłumaczoną
             for (let i = 0; i < htmlToSend.length; i += TRANSLATION_BATCH_SIZE) {
                 const chunk = htmlToSend.slice(i, i + TRANSLATION_BATCH_SIZE);
                 const chunkWithIds = chunk.map((text, idx) => ({
                     id: i + idx,
                     text,
                 }));
+                console.log(`[Debug]: Send to translate: ${JSON.stringify(chunkWithIds)}`)
 
                 const response = await ai.models.generateContent({
                     model: TRANSLATION_MODEL,
@@ -149,6 +113,7 @@ export function useBookTranslation() {
                 });
 
                 const translatedChunk = JSON.parse(response.text);
+                console.log(`[Debug]: Received translation: ${JSON.stringify(translatedChunk)}`);
                 translatedChunk.sort((a, b) => a.id - b.id);
                 translatedChunk.forEach((item) => finalTranslatedTexts.push(item.text));
             }
@@ -169,22 +134,20 @@ export function useBookTranslation() {
                 view.layout();
             }
 
-
-
-
-
-
-            
-            // 2. Zapis świeżo przetłumaczonego rozdziału w cache, żeby przy
-            // kolejnym otwarciu tego samego rozdziału nie odpytywać API ponownie.
-            // if (bookFileName && chapterId !== undefined && chapterId !== null) {
-            //     await setCachedChapter(bookFileName, chapterId, contentRoot.innerHTML);
-            // }
-
-
-
-
-
+            // 3. ZAPIS DO SERWERA NODE.JS (CACHE) PO UDANYM TŁUMACZENIU
+            try {
+                await fetch('http://localhost:3001/api/cache/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        originalHtmlArray: htmlToSend,
+                        translatedHtmlArray: finalTranslatedTexts
+                    })
+                });
+                console.log('[Tłumaczenie] Pomyślnie zapisano tłumaczenie rozdziału na serwerze.');
+            } catch (saveError) {
+                console.warn('[Tłumaczenie] Wystąpił błąd podczas zapisu do serwera Cache.', saveError);
+            }
 
         } catch (error) {
             console.error('[Tłumaczenie] Nieoczekiwany błąd podczas tłumaczenia rozdziału:', error);
@@ -194,20 +157,12 @@ export function useBookTranslation() {
         }
     }, []);
 
-    /**
-     * Włącza lub wyłącza tryb tłumaczenia. Przy włączaniu od razu
-     * uruchamia tłumaczenie bieżącego rozdziału (z cache lub przez API).
-     *
-     * @param {Document} doc - dokument iframe'a aktualnie wyświetlanego rozdziału
-     * @param {object} view - instancja <foliate-view>
-     * @param {object} [cacheInfo] - patrz `translateCurrentChapter`
-     */
     const toggleTranslation = useCallback(
-        (doc, view, cacheInfo) => {
+        (doc, view) => {
             setIsTranslate((prevState) => {
                 const newState = !prevState;
                 if (newState) {
-                    translateCurrentChapter(doc, view, cacheInfo);
+                    translateCurrentChapter(doc, view);
                 }
                 return newState;
             });

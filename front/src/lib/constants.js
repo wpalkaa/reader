@@ -1,5 +1,3 @@
-// Nazwa modelu Gemini używanego do tłumaczenia treści książki.
-export const TRANSLATION_MODEL = 'gemini-3.5-flash-lite';
 
 // Maksymalna liczba fragmentów tekstu wysyłanych w jednym żądaniu do API.
 export const TRANSLATION_BATCH_SIZE = 200;

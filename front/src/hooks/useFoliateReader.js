@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import 'foliate-js/view.js';
 
 import { getBookStyles } from '@/lib/booksStyles';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
 /**
  * Hook zarządzający cyklem życia widoku Foliate (custom element
@@ -19,7 +21,8 @@ import { getBookStyles } from '@/lib/booksStyles';
  * @param {React.RefObject} params.viewerContainerRef - kontener DOM, do którego wstrzykiwany jest <foliate-view>
  * @param {React.RefObject} params.foliateViewRef - referencja do instancji <foliate-view>
  * @param {React.RefObject} params.currentIframeDocRef - referencja do dokumentu iframe'a bieżącego rozdziału
- * @param {(event: Event) => void} [params.onChapterLoad] - wywoływane przy każdej zmianie rozdziału
+ * @param {React.RefObject} params.isTranslateRef - referencja z flaga informujaca czy tlumaczenie jest wlaczone
+ * @param {Function} params.translateCurrentChapter - funkcja tlumaczaca z hooka tlumaczenia
  */
 export function useFoliateReader({
     bookFile,
@@ -27,9 +30,12 @@ export function useFoliateReader({
     viewerContainerRef,
     foliateViewRef,
     currentIframeDocRef,
-    onChapterLoad,
+    isTranslateRef,
+    translateCurrentChapter,
 }) {
     const [progress, setProgress] = useState('0%');
+    const [toc, setToc] = useState([]);
+    const saveTimeoutRef = useRef(null);
 
     const nextPage = () => {
         if (foliateViewRef.current) foliateViewRef.current.next();
@@ -38,6 +44,12 @@ export function useFoliateReader({
     const prevPage = () => {
         if (foliateViewRef.current) foliateViewRef.current.prev();
     };
+
+    const goTo = (href) => {
+        if(foliateViewRef.current) {
+            foliateViewRef.current.goTo(href)
+        }
+    }
 
     // Otwarcie książki i podpięcie listenerów zdarzeń po wybraniu pliku.
     useEffect(() => {
@@ -53,11 +65,33 @@ export function useFoliateReader({
 
         view
             .open(bookFile)
-            .then(() => {
+            .then( async () => {
                 view.renderer.setAttribute('margin', '24px');
                 view.renderer.setStyles(getBookStyles(theme));
                 view.renderer.setAttribute('max-column-count', '1');
-                view.goTo(0);
+
+                // Pobieranie spisu treści
+                if( view.book && view.book.toc ) {
+                    setToc(view.book.toc);
+                }
+
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/progress/get`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bookId: bookFile.name })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.location) {
+                        view.goTo(data.location);
+                    } else {
+                        view.goTo(0);
+                    }
+                } catch (error) {
+                    console.error('[Foliate] Błąd podczas pobierania postępu z backendu:', error);
+                    view.goTo(0);
+                }
             })
             .catch((error) => {
                 console.error('[Foliate] Błąd podczas otwierania pliku książki:', error);
@@ -71,6 +105,21 @@ export function useFoliateReader({
                 const read = Math.round(fraction * 100);
                 setProgress(`${read}%`);
             }
+
+            // Zapisywanie postępu czytania (CFI) na backendzie z 1-sekundowym opóźnieniem
+            const cfi = event.detail?.cfi;
+            if (cfi) {
+                if (saveTimeoutRef.current) {
+                    clearTimeout(saveTimeoutRef.current);
+                }
+                saveTimeoutRef.current = setTimeout(() => {
+                    fetch(`${BACKEND_URL}/api/progress/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bookId: bookFile.name, location: cfi })
+                    }).catch(err => console.error('[Foliate] Błąd zapisu postępu:', err));
+                }, 1000);
+            }
         };
 
         // Zdarzenie 'load' jest emitowane przez Foliate przy każdej zmianie
@@ -78,7 +127,10 @@ export function useFoliateReader({
         // aktualnego dokumentu i informujemy komponent nadrzędny.
         const handleLoad = (event) => {
             currentIframeDocRef.current = event.detail.doc;
-            onChapterLoad?.(event);
+            
+            if (isTranslateRef.current) {
+                translateCurrentChapter(currentIframeDocRef.current, foliateViewRef.current);
+            }
         };
 
         view.addEventListener('relocate', handleRelocate);
@@ -100,6 +152,7 @@ export function useFoliateReader({
 
         window.addEventListener('keydown', handleKeyDown);
 
+        // Clenaup
         return () => {
             view.removeEventListener('relocate', handleRelocate);
             view.removeEventListener('load', handleLoad);
@@ -107,7 +160,9 @@ export function useFoliateReader({
             foliateViewRef.current = null;
             currentIframeDocRef.current = null;
             window.removeEventListener('keydown', handleKeyDown);
+            if(saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [bookFile]);
 
     // Aktualizacja stylów treści książki przy zmianie motywu (bez przeładowania pliku).
@@ -115,7 +170,8 @@ export function useFoliateReader({
         if (foliateViewRef.current?.renderer) {
             foliateViewRef.current.renderer.setStyles(getBookStyles(theme));
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [theme]);
 
-    return { progress, nextPage, prevPage };
+    return { progress, nextPage, prevPage, toc, goTo };
 }
