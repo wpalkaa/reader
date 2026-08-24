@@ -42,7 +42,7 @@ function App() {
     };
 
     return (
-        <div className="relative bg-bg-primary text-text-primary min-h-screen transition-colors duration-300 flex flex-col items-center py-10">
+        <div className="relative bg-bg-primary text-text-primary min-h-screen transition-colors duration-300 flex flex-col items-center py-3">
             <LightModeToggle theme={theme} toggleTheme={toggleTheme} />
 
             {!bookFile ? (

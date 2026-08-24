@@ -5,6 +5,7 @@ import {
     TRANSLATION_BATCH_SIZE,
     TRANSLATABLE_SELECTOR,
 } from '@/lib/constants';
+import { savePrevText, getPrevText } from '@/lib/handlePrevText';
 
 const TRANSLATION_MODEL = import.meta.env.VITE_GEMINI_MODEL;
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -28,13 +29,21 @@ export function useBookTranslation() {
         const blockElements = doc.querySelectorAll(TRANSLATABLE_SELECTOR);
         const elementsToTranslate = [];
         const htmlToSend = [];
+        const bookTitle = view.book?.metadata?.title || "Nieznana książka";
+        console.log("[Debug]: Tytuł książki do tłumaczenia: ", bookTitle);
+        console.log("[Debug]: htmlToSend: ", htmlToSend);
+        console.log("[Debug]: elementsToTranslate: ", elementsToTranslate)
 
+        // Get text from html elements
         blockElements.forEach((el) => {
             if (el.textContent && el.textContent.trim() !== '') {
                 elementsToTranslate.push(el);
                 htmlToSend.push(el.innerHTML);
             }
         });
+
+        // Save pre-translation text to localstorage
+        savePrevText(htmlToSend);
 
         if (htmlToSend.length === 0) {
             console.warn('[Tłumaczenie] W bieżącym rozdziale nie znaleziono żadnego tekstu do przetłumaczenia.');
@@ -94,7 +103,7 @@ export function useBookTranslation() {
 
                 const response = await ai.models.generateContent({
                     model: TRANSLATION_MODEL,
-                    contents: buildPrompt(JSON.stringify(chunkWithIds)),
+                    contents: buildPrompt(JSON.stringify(chunkWithIds), bookTitle),
                     config: {
                         temperature: 0.1,
                         responseMimeType: 'application/json',
@@ -157,12 +166,51 @@ export function useBookTranslation() {
         }
     }, []);
 
+    const revertTranslation = (doc, view) => {
+        if( !doc || !view ) return;
+
+        const blockElements = doc.querySelectorAll(TRANSLATABLE_SELECTOR);
+        const elementsToRevert = [];
+
+        blockElements.forEach((el) => {
+            if( el.textContent && el.textContent.trim() !== '' ) {
+                elementsToRevert.push(el);
+            }
+        });
+
+        const prevText = getPrevText();
+        
+        if (!prevText || prevText.length === 0) {
+            console.warn('[Tłumaczenie] Nie znaleziono zapisanego oryginalnego tekstu.');
+            return;
+        }
+
+        if (prevText.length !== elementsToRevert.length) {
+            console.error(`[Tłumaczenie] Niezgodność liczby elementów przy cofaniu tłumaczenia ${prevText.length}/${elementsToRevert.length}.`);
+            return;
+        }
+
+        elementsToRevert.forEach((el, index) => {
+            el.innerHTML = prevText[index];
+        });
+
+        if (typeof view.layout === 'function') {
+            view.layout();
+        }
+
+        console.log('[Tłumaczenie] Przywrócono oryginalny tekst.');
+    }
+
     const toggleTranslation = useCallback(
         (doc, view) => {
             setIsTranslate((prevState) => {
                 const newState = !prevState;
                 if (newState) {
+                    // True => translate
                     translateCurrentChapter(doc, view);
+                } else {
+                    // False => revert to original
+                    revertTranslation(doc, view);
                 }
                 return newState;
             });
