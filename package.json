@@ -1,0 +1,24 @@
+{
+  "name": "czytnik",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently \"node backend/server.js\" \"cd front && npm run preview\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wpalkaa/reader.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/wpalkaa/reader/issues"
+  },
+  "homepage": "https://github.com/wpalkaa/reader#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

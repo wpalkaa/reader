@@ -26,3 +26,6 @@ dist-ssr
 *.sln
 *.sw?
 
+
+Lord*
+translation_cache.json
